@@ -586,12 +586,13 @@
         nodesArray.forEach(node => {
           forces.set(node.id, { fx: 0, fy: 0 });
         });
-        // Repulsive forces.
+
+        // --- Repulsive Forces (between every pair) ---
         for (let i = 0; i < nodesArray.length; i++) {
           for (let j = i + 1; j < nodesArray.length; j++) {
             const n1 = nodesArray[i];
             const n2 = nodesArray[j];
-            // If either node is isolated (a root with no children), skip repulsion.
+            // (Optionally skip repulsion for isolated nodes.)
             if (
               (!n1.parent && n1.children.length === 0) ||
               (!n2.parent && n2.children.length === 0)
@@ -610,7 +611,8 @@
             forces.get(n2.id).fy -= fy;
           }
         }
-        // Spring forces.
+
+        // --- Spring Forces (for connected nodes) ---
         this.connections.forEach(({ source, target }) => {
           const dx = target.x - source.x;
           const dy = target.y - source.y;
@@ -624,8 +626,48 @@
           forces.get(target.id).fx -= fx;
           forces.get(target.id).fy -= fy;
         });
+
+        // --- Collision (Non-overlap) Forces ---
+        const collisionForce = 0.7; // Adjust this value as needed.
+        for (let i = 0; i < nodesArray.length; i++) {
+          for (let j = i + 1; j < nodesArray.length; j++) {
+            const nodeA = nodesArray[i];
+            const nodeB = nodesArray[j];
+            // Get bounding boxes based on the simulation coordinates.
+            const ax = nodeA.x;
+            const ay = nodeA.y;
+            const aw = nodeA.element.offsetWidth;
+            const ah = nodeA.element.offsetHeight;
+            const bx = nodeB.x;
+            const by = nodeB.y;
+            const bw = nodeB.element.offsetWidth;
+            const bh = nodeB.element.offsetHeight;
+
+            // Check if boxes overlap.
+            if (ax < bx + bw &&
+                ax + aw > bx &&
+                ay < by + bh &&
+                ay + ah > by) {
+              // Calculate overlap amounts in X and Y.
+              const overlapX = Math.min(ax + aw, bx + bw) - Math.max(ax, bx);
+              const overlapY = Math.min(ay + ah, by + bh) - Math.max(ay, by);
+              // Apply force along the smallest overlap direction.
+              if (overlapX < overlapY) {
+                const sign = (ax + aw / 2 < bx + bw / 2) ? -1 : 1;
+                forces.get(nodeA.id).fx += sign * overlapX * collisionForce;
+                forces.get(nodeB.id).fx -= sign * overlapX * collisionForce;
+              } else {
+                const sign = (ay + ah / 2 < by + bh / 2) ? -1 : 1;
+                forces.get(nodeA.id).fy += sign * overlapY * collisionForce;
+                forces.get(nodeB.id).fy -= sign * overlapY * collisionForce;
+              }
+            }
+          }
+        }
+
+        // --- Update Velocities and Positions ---
         nodesArray.forEach(node => {
-          // If the node is isolated (a root with no children), do not update its position.
+          // Skip isolated nodes from simulation (if desired)
           if (!node.parent && node.children.length === 0) {
             node.vx = 0;
             node.vy = 0;
@@ -633,8 +675,15 @@
           }
           if (!node.fixed) {
             const f = forces.get(node.id);
+            // Integrate forces with friction.
             node.vx = (node.vx + f.fx) * this.simulation.friction;
             node.vy = (node.vy + f.fy) * this.simulation.friction;
+
+            // Limit maximum velocity for stability.
+            const maxVelocity = 50;
+            node.vx = Math.max(-maxVelocity, Math.min(maxVelocity, node.vx));
+            node.vy = Math.max(-maxVelocity, Math.min(maxVelocity, node.vy));
+
             node.x += node.vx;
             node.y += node.vy;
             node.element.style.left = `${node.x}px`;
@@ -643,7 +692,7 @@
         });
         this.updateConnections();
       }
-      
+
       /***********************
        * Persistence: Save, Load, and File I/O
        ***********************/
