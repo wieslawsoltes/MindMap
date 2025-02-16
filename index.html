@@ -591,6 +591,13 @@
           for (let j = i + 1; j < nodesArray.length; j++) {
             const n1 = nodesArray[i];
             const n2 = nodesArray[j];
+            // If either node is isolated (a root with no children), skip repulsion.
+            if (
+              (!n1.parent && n1.children.length === 0) ||
+              (!n2.parent && n2.children.length === 0)
+            ) {
+              continue;
+            }
             const dx = n1.x - n2.x;
             const dy = n1.y - n2.y;
             let distance = Math.sqrt(dx * dx + dy * dy) || 0.1;
@@ -618,6 +625,12 @@
           forces.get(target.id).fy -= fy;
         });
         nodesArray.forEach(node => {
+          // If the node is isolated (a root with no children), do not update its position.
+          if (!node.parent && node.children.length === 0) {
+            node.vx = 0;
+            node.vy = 0;
+            return;
+          }
           if (!node.fixed) {
             const f = forces.get(node.id);
             node.vx = (node.vx + f.fx) * this.simulation.friction;
@@ -666,6 +679,7 @@
       }
       
       loadStateFromObject(data) {
+        // Remove any existing nodes.
         this.nodes.forEach(node => {
           if (node.element.parentElement) node.element.parentElement.removeChild(node.element);
         });
@@ -674,11 +688,17 @@
         this.rootNodes = [];
         this.nodeCounter = 0;
         const nodesById = {};
+        // Create nodes with correct ids.
         data.nodes.forEach(n => {
           const node = this.addNode(n.text, n.x, n.y, null);
+          // Remove the auto-generated id.
+          this.nodes.delete(node.id);
+          // Set the correct id.
           node.id = n.id;
+          this.nodes.set(n.id, node);
           nodesById[n.id] = node;
         });
+        // Re-establish connections.
         data.nodes.forEach(n => {
           if (n.parent) {
             const child = nodesById[n.id];
