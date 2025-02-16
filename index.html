@@ -18,12 +18,20 @@
       top: 10px;
       left: 10px;
       z-index: 1000;
+      display: flex;
+      gap: 5px;
     }
     #toolbar button {
       padding: 8px 12px;
-      font-size: 14px;
+      font-size: 16px;
       cursor: pointer;
-      margin-right: 5px;
+      border: none;
+      background: #007bff;
+      color: #fff;
+      border-radius: 4px;
+    }
+    #toolbar button:hover {
+      background: #0056b3;
     }
     /* Mind map container */
     #mindmap-container {
@@ -97,14 +105,14 @@
 <body>
   <!-- Toolbar -->
   <div id="toolbar">
-    <button id="addNodeBtn">Add Child</button>
-    <button id="addRootBtn">New Root Node</button>
-    <button id="zoomInBtn">Zoom In</button>
-    <button id="zoomOutBtn">Zoom Out</button>
-    <button id="zoomAllBtn">Zoom All</button>
-    <button id="saveBtn">Save</button>
-    <button id="loadBtn">Load</button>
-    <button id="newMindMapBtn">New Mind Map</button>
+    <button id="addNodeBtn" title="Add Child">✚</button>
+    <button id="addRootBtn" title="New Root Node">★</button>
+    <button id="zoomInBtn" title="Zoom In">＋</button>
+    <button id="zoomOutBtn" title="Zoom Out">－</button>
+    <button id="zoomAllBtn" title="Zoom All">🔍</button>
+    <button id="saveBtn" title="Save">💾</button>
+    <button id="loadBtn" title="Load">📂</button>
+    <button id="newMindMapBtn" title="New Mind Map">🆕</button>
   </div>
 
   <!-- Mind map container -->
@@ -134,6 +142,7 @@
         this.mindMap = mindMap;
         this.parent = null;
         this.children = [];
+        this.lastTap = 0;  // For detecting double taps on touch devices.
         this.element = this._createElement();
         this._initDrag();
       }
@@ -150,10 +159,22 @@
           // If tapping on an action button, do nothing.
           if (e.target.closest('.actions')) return;
           e.stopPropagation();
+          
+          // For touch devices: detect a quick double-tap to edit text.
+          if (e.pointerType === "touch") {
+            const currentTime = Date.now();
+            if (this.lastTap && (currentTime - this.lastTap) < 300) {
+              this.editText();
+              this.lastTap = 0;
+              return; // Do not start drag on a double-tap.
+            }
+            this.lastTap = currentTime;
+          }
+          
           this.onSelect(this);
           this._startDrag(e);
         });
-        // Double-click (or double-tap) on a node edits its text.
+        // Double-click (for mouse) edits its text.
         nodeEl.addEventListener('dblclick', (e) => {
           e.stopPropagation();
           this.editText();
@@ -333,6 +354,14 @@
         node.showActions();
       }
       
+      deselectNode() {
+        if (this.selectedNode) {
+          this.selectedNode.element.classList.remove('selected');
+          this.selectedNode.hideActions();
+          this.selectedNode = null;
+        }
+      }
+      
       updateConnections() {
         // Clear previous connections.
         while (this.svg.firstChild) {
@@ -398,14 +427,23 @@
        * Pan & Zoom – Improved for Touch & Mouse
        ***********************/
       _initPanZoom() {
+        // Pointerdown for panning & pinch-zoom.
         this.container.addEventListener('pointerdown', (e) => {
           this.activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
-          if (e.target === this.container) {
+          // If the target is not a node, start panning.
+          if (!e.target.closest('.node')) {
             this.isPanning = true;
             this.panStartX = e.clientX;
             this.panStartY = e.clientY;
             this.startPanX = this.panX;
             this.startPanY = this.panY;
+          }
+        });
+        
+        // Additional pointerdown listener to deselect a node when tapping empty space.
+        this.container.addEventListener('pointerdown', (e) => {
+          if (!e.target.closest('.node')) {
+            this.deselectNode();
           }
         });
         
