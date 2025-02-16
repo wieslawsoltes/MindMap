@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Enhanced Mind Map App – Touch Pan & Zoom</title>
+  <style>
+    /* Base styles */
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    /* Toolbar */
+    #toolbar {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 1000;
+    }
+    #toolbar button {
+      padding: 8px 12px;
+      font-size: 14px;
+      cursor: pointer;
+      margin-right: 5px;
+    }
+    /* Mind map container */
+    #mindmap-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: #f9f9f9;
+      overflow: hidden;
+      touch-action: none;
+    }
+    /* Scene for nodes (which is panned/zoomed) */
+    #scene {
+      position: absolute;
+      top: 0;
+      left: 0;
+      transform-origin: 0 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1; /* nodes above wires */
+    }
+    /* Node styling */
+    .node {
+      position: absolute;
+      padding: 10px 15px;
+      background-color: #fff;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.1);
+      user-select: none;
+      cursor: grab;
+      transition: box-shadow 0.2s, border-color 0.2s;
+    }
+    .node.selected {
+      border-color: #007bff;
+      box-shadow: 0 0 8px rgba(0, 123, 255, 0.5);
+    }
+    /* Node action buttons */
+    .node .actions {
+      position: absolute;
+      top: -20px;
+      right: -20px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .node .actions button {
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      border: none;
+      background-color: #007bff;
+      color: white;
+      border-radius: 50%;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    /* SVG overlay for connection wires (placed under the nodes) */
+    #connections-svg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 0; /* behind the scene */
+    }
+  </style>
+</head>
+<body>
+  <!-- Toolbar -->
+  <div id="toolbar">
+    <button id="addNodeBtn">Add Child</button>
+    <button id="addRootBtn">New Root Node</button>
+    <button id="zoomInBtn">Zoom In</button>
+    <button id="zoomOutBtn">Zoom Out</button>
+    <button id="zoomAllBtn">Zoom All</button>
+    <button id="saveBtn">Save</button>
+    <button id="loadBtn">Load</button>
+    <button id="newMindMapBtn">New Mind Map</button>
+  </div>
+
+  <!-- Mind map container -->
+  <div id="mindmap-container">
+    <!-- The scene holds the nodes and is panned/zoomed -->
+    <div id="scene"></div>
+    <!-- The SVG sits behind the scene -->
+    <svg id="connections-svg"></svg>
+  </div>
+
+  <script>
+    /***********************
+     * MindMapNode Class
+     * Represents a node in the mind map.
+     ***********************/
+    class MindMapNode {
+      constructor({ id, text = 'Node', x = 100, y = 100, onSelect = () => {}, onDrag = () => {}, mindMap }) {
+        this.id = id;
+        this.text = text;
+        this.x = x;
+        this.y = y;
+        this.vx = 0;
+        this.vy = 0;
+        this.fixed = false;
+        this.onSelect = onSelect;
+        this.onDrag = onDrag;
+        this.mindMap = mindMap;
+        this.parent = null;
+        this.children = [];
+        this.element = this._createElement();
+        this._initDrag();
+      }
+      
+      _createElement() {
+        const nodeEl = document.createElement('div');
+        nodeEl.classList.add('node');
+        nodeEl.textContent = this.text;
+        nodeEl.style.left = `${this.x}px`;
+        nodeEl.style.top = `${this.y}px`;
+        
+        // Use pointer events so both mouse and touch work uniformly.
+        nodeEl.addEventListener('pointerdown', (e) => {
+          // If tapping on an action button, do nothing.
+          if (e.target.closest('.actions')) return;
+          e.stopPropagation();
+          this.onSelect(this);
+          this._startDrag(e);
+        });
+        // Double-click (or double-tap) on a node edits its text.
+        nodeEl.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
+          this.editText();
+        });
+        return nodeEl;
+      }
+      
+      _initDrag() {
+        this._onPointerMove = this._onPointerMove.bind(this);
+        this._onPointerUp = this._onPointerUp.bind(this);
+      }
+      
+      _startDrag(e) {
+        this.fixed = true;
+        this.startX = e.clientX;
+        this.startY = e.clientY;
+        this.initialX = this.x;
+        this.initialY = this.y;
+        this.element.setPointerCapture(e.pointerId);
+        this.element.addEventListener('pointermove', this._onPointerMove);
+        this.element.addEventListener('pointerup', this._onPointerUp);
+        this.element.addEventListener('pointercancel', this._onPointerUp);
+      }
+      
+      _onPointerMove(e) {
+        const dx = e.clientX - this.startX;
+        const dy = e.clientY - this.startY;
+        this.setPosition(this.initialX + dx, this.initialY + dy);
+        this.onDrag(this);
+      }
+      
+      _onPointerUp(e) {
+        this.fixed = false;
+        this.element.releasePointerCapture(e.pointerId);
+        this.element.removeEventListener('pointermove', this._onPointerMove);
+        this.element.removeEventListener('pointerup', this._onPointerUp);
+        this.element.removeEventListener('pointercancel', this._onPointerUp);
+        this.mindMap.saveState();
+      }
+      
+      setPosition(x, y) {
+        this.x = x;
+        this.y = y;
+        this.element.style.left = `${x}px`;
+        this.element.style.top = `${y}px`;
+      }
+      
+      showActions() {
+        if (this.element.querySelector('.actions')) return;
+        const actionsDiv = document.createElement('div');
+        actionsDiv.classList.add('actions');
+        
+        // "Add Child" button.
+        const addBtn = document.createElement('button');
+        addBtn.innerHTML = '+';
+        addBtn.title = 'Add Child';
+        addBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const childX = this.x + 100;
+          const childY = this.y + 50;
+          this.mindMap.addNode('New Idea', childX, childY, this);
+        });
+        
+        // "Edit" button.
+        const editBtn = document.createElement('button');
+        editBtn.innerHTML = '✎';
+        editBtn.title = 'Edit Text';
+        editBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.editText();
+        });
+        
+        // "Remove" button.
+        const removeBtn = document.createElement('button');
+        removeBtn.innerHTML = '−';
+        removeBtn.title = 'Remove Node';
+        removeBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.mindMap.removeNode(this);
+        });
+        
+        actionsDiv.appendChild(addBtn);
+        actionsDiv.appendChild(editBtn);
+        actionsDiv.appendChild(removeBtn);
+        this.element.appendChild(actionsDiv);
+      }
+      
+      hideActions() {
+        const actionsDiv = this.element.querySelector('.actions');
+        if (actionsDiv) {
+          this.element.removeChild(actionsDiv);
+        }
+      }
+      
+      editText() {
+        const newText = prompt("Edit node text:", this.text);
+        if (newText !== null) {
+          this.text = newText;
+          this.element.firstChild.nodeValue = newText;
+          this.mindMap.saveState();
+        }
+      }
+    }
+    
+    /***********************
+     * MindMap Class
+     * Manages nodes, connections, pan/zoom, simulation, and persistence.
+     ***********************/
+    class MindMap {
+      constructor(containerId, sceneId, svgId) {
+        this.container = document.getElementById(containerId);
+        this.scene = document.getElementById(sceneId);
+        this.svg = document.getElementById(svgId);
+        this.nodes = new Map();
+        this.connections = [];
+        this.nodeCounter = 0;
+        this.selectedNode = null;
+        this.rootNodes = [];
+        // Pan & zoom parameters.
+        this.panX = 0;
+        this.panY = 0;
+        this.scale = 1;
+        this.isPanning = false;
+        this.panStartX = 0;
+        this.panStartY = 0;
+        this.startPanX = 0;
+        this.startPanY = 0;
+        // For pinch zoom.
+        this.activePointers = new Map();
+        this.initialPinchDistance = null;
+        this.initialPinchScale = null;
+        // Simulation parameters.
+        this.simulation = {
+          repulsion: 5000,
+          springLength: 150,
+          springStiffness: 0.05,
+          friction: 0.90
+        };
+        // Initialize pan/zoom.
+        this._initPanZoom();
+        this._initWheelZoom();
+        this._startSimulation();
+      }
+      
+      addNode(text = 'Node', x = 150, y = 150, parentNode = null) {
+        const id = `node-${this.nodeCounter++}`;
+        const node = new MindMapNode({
+          id,
+          text,
+          x,
+          y,
+          onSelect: this._selectNode.bind(this),
+          onDrag: () => { this.updateConnections(); },
+          mindMap: this
+        });
+        this.nodes.set(id, node);
+        this.scene.appendChild(node.element);
+        if (parentNode) {
+          node.parent = parentNode;
+          parentNode.children.push(node);
+          this.connections.push({ source: parentNode, target: node });
+        } else {
+          this.rootNodes.push(node);
+        }
+        this.updateConnections();
+        this.saveState();
+        return node;
+      }
+      
+      _selectNode(node) {
+        if (this.selectedNode && this.selectedNode !== node) {
+          this.selectedNode.element.classList.remove('selected');
+          this.selectedNode.hideActions();
+        }
+        this.selectedNode = node;
+        node.element.classList.add('selected');
+        node.showActions();
+      }
+      
+      updateConnections() {
+        // Clear previous connections.
+        while (this.svg.firstChild) {
+          this.svg.removeChild(this.svg.firstChild);
+        }
+        // Ensure SVG always fills the container.
+        this.svg.setAttribute('width', this.container.clientWidth);
+        this.svg.setAttribute('height', this.container.clientHeight);
+        
+        // Draw cubic Bézier curves for connections.
+        const containerRect = this.container.getBoundingClientRect();
+        this.connections.forEach(({ source, target }) => {
+          const sourceRect = source.element.getBoundingClientRect();
+          const targetRect = target.element.getBoundingClientRect();
+          const x1 = sourceRect.left - containerRect.left + sourceRect.width / 2;
+          const y1 = sourceRect.top - containerRect.top + sourceRect.height / 2;
+          const x2 = targetRect.left - containerRect.left + targetRect.width / 2;
+          const y2 = targetRect.top - containerRect.top + targetRect.height / 2;
+          
+          // Calculate control points (25% and 75% along horizontal distance)
+          const cp1x = x1 + (x2 - x1) * 0.25;
+          const cp1y = y1;
+          const cp2x = x1 + (x2 - x1) * 0.75;
+          const cp2y = y2;
+          
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          const d = `M ${x1} ${y1} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${x2} ${y2}`;
+          path.setAttribute('d', d);
+          path.setAttribute('stroke', '#888');
+          path.setAttribute('stroke-width', '2');
+          path.setAttribute('fill', 'none');
+          path.setAttribute('stroke-linecap', 'round');
+          // Keeps stroke width constant.
+          path.setAttribute('vector-effect', 'non-scaling-stroke');
+          this.svg.appendChild(path);
+        });
+      }
+      
+      removeNode(node) {
+        if (node.children) {
+          [...node.children].forEach(child => {
+            this.removeNode(child);
+          });
+        }
+        this.connections = this.connections.filter(conn => conn.source !== node && conn.target !== node);
+        if (node.parent) {
+          node.parent.children = node.parent.children.filter(child => child !== node);
+        } else {
+          this.rootNodes = this.rootNodes.filter(root => root !== node);
+        }
+        this.nodes.delete(node.id);
+        if (node.element.parentElement) {
+          node.element.parentElement.removeChild(node.element);
+        }
+        if (this.selectedNode === node) {
+          this.selectedNode = null;
+        }
+        this.updateConnections();
+        this.saveState();
+      }
+      
+      /***********************
+       * Pan & Zoom – Improved for Touch & Mouse
+       ***********************/
+      _initPanZoom() {
+        this.container.addEventListener('pointerdown', (e) => {
+          this.activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+          if (e.target === this.container) {
+            this.isPanning = true;
+            this.panStartX = e.clientX;
+            this.panStartY = e.clientY;
+            this.startPanX = this.panX;
+            this.startPanY = this.panY;
+          }
+        });
+        
+        this.container.addEventListener('pointermove', (e) => {
+          if (this.activePointers.has(e.pointerId)) {
+            this.activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+          }
+          if (this.activePointers.size >= 2) {
+            const points = Array.from(this.activePointers.values());
+            if (!this.initialPinchDistance) {
+              this.initialPinchDistance = Math.hypot(
+                points[0].clientX - points[1].clientX,
+                points[0].clientY - points[1].clientY
+              );
+              this.initialPinchScale = this.scale;
+            } else {
+              const currentDistance = Math.hypot(
+                points[0].clientX - points[1].clientX,
+                points[0].clientY - points[1].clientY
+              );
+              const newScale = this.initialPinchScale * (currentDistance / this.initialPinchDistance);
+              const rect = this.container.getBoundingClientRect();
+              const center = {
+                x: ((points[0].clientX + points[1].clientX) / 2) - rect.left,
+                y: ((points[0].clientY + points[1].clientY) / 2) - rect.top
+              };
+              const oldScale = this.scale;
+              this.scale = Math.min(Math.max(newScale, 0.2), 5);
+              this.panX = center.x - ((center.x - this.panX) * this.scale / oldScale);
+              this.panY = center.y - ((center.y - this.panY) * this.scale / oldScale);
+              this._updateTransform();
+            }
+          } else if (this.isPanning) {
+            const dx = e.clientX - this.panStartX;
+            const dy = e.clientY - this.panStartY;
+            this.panX = this.startPanX + dx;
+            this.panY = this.startPanY + dy;
+            this._updateTransform();
+          }
+        });
+        
+        const pointerEndHandler = (e) => {
+          this.activePointers.delete(e.pointerId);
+          if (this.activePointers.size < 2) {
+            this.initialPinchDistance = null;
+            this.initialPinchScale = null;
+          }
+          if (e.target === this.container) {
+            this.isPanning = false;
+          }
+        };
+        this.container.addEventListener('pointerup', pointerEndHandler);
+        this.container.addEventListener('pointercancel', pointerEndHandler);
+      }
+      
+      _initWheelZoom() {
+        this.container.addEventListener('wheel', (e) => {
+          e.preventDefault();
+          const rect = this.container.getBoundingClientRect();
+          const pointerX = e.clientX - rect.left;
+          const pointerY = e.clientY - rect.top;
+          const oldScale = this.scale;
+          this.scale *= (e.deltaY < 0 ? 1.1 : 0.9);
+          this.scale = Math.min(Math.max(this.scale, 0.2), 5);
+          this.panX = pointerX - ((pointerX - this.panX) * this.scale / oldScale);
+          this.panY = pointerY - ((pointerY - this.panY) * this.scale / oldScale);
+          this._updateTransform();
+        });
+      }
+      
+      _updateTransform() {
+        this.scene.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${this.scale})`;
+        // After transform, update connection wires.
+        this.updateConnections();
+      }
+      
+      zoomIn() {
+        const rect = this.container.getBoundingClientRect();
+        const pointerX = rect.width / 2;
+        const pointerY = rect.height / 2;
+        const oldScale = this.scale;
+        this.scale *= 1.1;
+        this.scale = Math.min(this.scale, 5);
+        this.panX = pointerX - ((pointerX - this.panX) * this.scale / oldScale);
+        this.panY = pointerY - ((pointerY - this.panY) * this.scale / oldScale);
+        this._updateTransform();
+      }
+      
+      zoomOut() {
+        const rect = this.container.getBoundingClientRect();
+        const pointerX = rect.width / 2;
+        const pointerY = rect.height / 2;
+        const oldScale = this.scale;
+        this.scale *= 0.9;
+        this.scale = Math.max(this.scale, 0.2);
+        this.panX = pointerX - ((pointerX - this.panX) * this.scale / oldScale);
+        this.panY = pointerY - ((pointerY - this.panY) * this.scale / oldScale);
+        this._updateTransform();
+      }
+      
+      zoomAll() {
+        if (this.nodes.size === 0) return;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        this.nodes.forEach(node => {
+          minX = Math.min(minX, node.x);
+          minY = Math.min(minY, node.y);
+          maxX = Math.max(maxX, node.x + node.element.offsetWidth);
+          maxY = Math.max(maxY, node.y + node.element.offsetHeight);
+        });
+        const padding = 50;
+        minX -= padding;
+        minY -= padding;
+        maxX += padding;
+        maxY += padding;
+        const containerRect = this.container.getBoundingClientRect();
+        const width = maxX - minX;
+        const height = maxY - minY;
+        const scaleX = containerRect.width / width;
+        const scaleY = containerRect.height / height;
+        this.scale = Math.min(scaleX, scaleY, 5);
+        this.panX = (containerRect.width - width * this.scale) / 2 - minX * this.scale;
+        this.panY = (containerRect.height - height * this.scale) / 2 - minY * this.scale;
+        this._updateTransform();
+      }
+      
+      /***********************
+       * Force-Directed Simulation
+       ***********************/
+      _startSimulation() {
+        const simulate = () => {
+          this._simulationTick();
+          requestAnimationFrame(simulate);
+        };
+        simulate();
+      }
+      
+      _simulationTick() {
+        const nodesArray = Array.from(this.nodes.values());
+        const forces = new Map();
+        nodesArray.forEach(node => {
+          forces.set(node.id, { fx: 0, fy: 0 });
+        });
+        // Repulsive forces.
+        for (let i = 0; i < nodesArray.length; i++) {
+          for (let j = i + 1; j < nodesArray.length; j++) {
+            const n1 = nodesArray[i];
+            const n2 = nodesArray[j];
+            const dx = n1.x - n2.x;
+            const dy = n1.y - n2.y;
+            let distance = Math.sqrt(dx * dx + dy * dy) || 0.1;
+            const force = this.simulation.repulsion / (distance * distance);
+            const fx = (dx / distance) * force;
+            const fy = (dy / distance) * force;
+            forces.get(n1.id).fx += fx;
+            forces.get(n1.id).fy += fy;
+            forces.get(n2.id).fx -= fx;
+            forces.get(n2.id).fy -= fy;
+          }
+        }
+        // Spring forces.
+        this.connections.forEach(({ source, target }) => {
+          const dx = target.x - source.x;
+          const dy = target.y - source.y;
+          let distance = Math.sqrt(dx * dx + dy * dy) || 0.1;
+          const difference = distance - this.simulation.springLength;
+          const force = this.simulation.springStiffness * difference;
+          const fx = (dx / distance) * force;
+          const fy = (dy / distance) * force;
+          forces.get(source.id).fx += fx;
+          forces.get(source.id).fy += fy;
+          forces.get(target.id).fx -= fx;
+          forces.get(target.id).fy -= fy;
+        });
+        nodesArray.forEach(node => {
+          if (!node.fixed) {
+            const f = forces.get(node.id);
+            node.vx = (node.vx + f.fx) * this.simulation.friction;
+            node.vy = (node.vy + f.fy) * this.simulation.friction;
+            node.x += node.vx;
+            node.y += node.vy;
+            node.element.style.left = `${node.x}px`;
+            node.element.style.top = `${node.y}px`;
+          }
+        });
+        this.updateConnections();
+      }
+      
+      /***********************
+       * Persistence: Save, Load, and File I/O
+       ***********************/
+      getStateData() {
+        const data = {
+          nodes: [],
+          panX: this.panX,
+          panY: this.panY,
+          scale: this.scale
+        };
+        this.nodes.forEach(node => {
+          data.nodes.push({
+            id: node.id,
+            text: node.text,
+            x: node.x,
+            y: node.y,
+            parent: node.parent ? node.parent.id : null
+          });
+        });
+        return data;
+      }
+      
+      saveState() {
+        const data = this.getStateData();
+        localStorage.setItem("mindMapState", JSON.stringify(data));
+      }
+      
+      loadState() {
+        const saved = localStorage.getItem("mindMapState");
+        if (!saved) return;
+        const data = JSON.parse(saved);
+        this.loadStateFromObject(data);
+      }
+      
+      loadStateFromObject(data) {
+        this.nodes.forEach(node => {
+          if (node.element.parentElement) node.element.parentElement.removeChild(node.element);
+        });
+        this.nodes.clear();
+        this.connections = [];
+        this.rootNodes = [];
+        this.nodeCounter = 0;
+        const nodesById = {};
+        data.nodes.forEach(n => {
+          const node = this.addNode(n.text, n.x, n.y, null);
+          node.id = n.id;
+          nodesById[n.id] = node;
+        });
+        data.nodes.forEach(n => {
+          if (n.parent) {
+            const child = nodesById[n.id];
+            const parent = nodesById[n.parent];
+            child.parent = parent;
+            parent.children.push(child);
+            this.connections.push({ source: parent, target: child });
+            this.rootNodes = this.rootNodes.filter(root => root !== child);
+          }
+        });
+        let maxId = 0;
+        data.nodes.forEach(n => {
+          const num = parseInt(n.id.split('-')[1]);
+          if (num > maxId) maxId = num;
+        });
+        this.nodeCounter = maxId + 1;
+        this.panX = data.panX;
+        this.panY = data.panY;
+        this.scale = data.scale;
+        this._updateTransform();
+        this.updateConnections();
+      }
+      
+      newMindMap() {
+        this.nodes.forEach(node => {
+          if (node.element.parentElement) node.element.parentElement.removeChild(node.element);
+        });
+        this.nodes.clear();
+        this.connections = [];
+        this.rootNodes = [];
+        this.nodeCounter = 0;
+        localStorage.removeItem("mindMapState");
+        const rect = this.container.getBoundingClientRect();
+        const x = (rect.width / 2 - 50 - this.panX) / this.scale;
+        const y = (rect.height / 2 - 25 - this.panY) / this.scale;
+        this.addNode("Central Idea", x, y);
+        this.zoomAll();
+      }
+    }
+    
+    /***********************
+     * Initialization
+     ***********************/
+    document.addEventListener('DOMContentLoaded', () => {
+      const mindMap = new MindMap('mindmap-container', 'scene', 'connections-svg');
+      
+      // Toolbar button: Add Child.
+      document.getElementById('addNodeBtn').addEventListener('click', () => {
+        const parentNode = mindMap.selectedNode || mindMap.rootNodes[0];
+        if (parentNode) {
+          const newX = parentNode.x + 150;
+          const newY = parentNode.y;
+          mindMap.addNode('New Idea', newX, newY, parentNode);
+        }
+      });
+      
+      // Toolbar button: New Root Node.
+      document.getElementById('addRootBtn').addEventListener('click', () => {
+        const rect = document.getElementById('mindmap-container').getBoundingClientRect();
+        const x = (rect.width / 2 - 50 - mindMap.panX) / mindMap.scale;
+        const y = (rect.height / 2 - 25 - mindMap.panY) / mindMap.scale;
+        mindMap.addNode('New Root', x, y);
+      });
+      
+      // Zoom buttons.
+      document.getElementById('zoomInBtn').addEventListener('click', () => {
+        mindMap.zoomIn();
+      });
+      document.getElementById('zoomOutBtn').addEventListener('click', () => {
+        mindMap.zoomOut();
+      });
+      document.getElementById('zoomAllBtn').addEventListener('click', () => {
+        mindMap.zoomAll();
+      });
+      
+      // File Save: also auto-saves to localStorage.
+      document.getElementById('saveBtn').addEventListener('click', () => {
+        mindMap.saveState();
+        const data = mindMap.getStateData();
+        const dataStr = JSON.stringify(data, null, 2);
+        const blob = new Blob([dataStr], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "mindmap.json";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        alert("Mind map saved to file!");
+      });
+      
+      // File Load.
+      document.getElementById('loadBtn').addEventListener('click', () => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = "application/json";
+        input.addEventListener("change", (event) => {
+          const file = event.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            try {
+              const data = JSON.parse(e.target.result);
+              mindMap.loadStateFromObject(data);
+            } catch (err) {
+              alert("Failed to load mind map: " + err);
+            }
+          };
+          reader.readAsText(file);
+        });
+        input.click();
+      });
+      
+      // New Mind Map.
+      document.getElementById('newMindMapBtn').addEventListener('click', () => {
+        if (confirm("Start a new mind map? Current changes will be lost.")) {
+          mindMap.newMindMap();
+        }
+      });
+      
+      // Auto-load saved state or create an initial node.
+      if (localStorage.getItem("mindMapState")) {
+        mindMap.loadState();
+      } else {
+        const containerRect = document.getElementById('mindmap-container').getBoundingClientRect();
+        const rootX = (containerRect.width / 2 - 50) / mindMap.scale;
+        const rootY = (containerRect.height / 2 - 25) / mindMap.scale;
+        mindMap.addNode('Central Idea', rootX, rootY);
+      }
+      
+      // Zoom All on startup.
+      mindMap.zoomAll();
+    });
+  </script>
+</body>
+</html>
