@@ -66,6 +66,7 @@
       cursor: grab;
       transition: box-shadow 0.2s, border-color 0.2s;
       z-index: 1; /* default stacking */
+      display: inline-block;
     }
     .node.selected {
       border-color: #007bff;
@@ -103,6 +104,38 @@
       pointer-events: none;
       z-index: 0; /* behind the scene */
     }
+    /* Keyboard Help Overlay */
+    #keyboardHelpOverlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      color: #fff;
+      display: none;
+      z-index: 3000;
+      overflow-y: auto;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    #keyboardHelpOverlay .content {
+      max-width: 600px;
+      margin: 0 auto;
+      background: #333;
+      padding: 20px;
+      border-radius: 8px;
+    }
+    #keyboardHelpOverlay button.close {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: transparent;
+      border: none;
+      color: #fff;
+      font-size: 24px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -116,6 +149,7 @@
     <button id="saveBtn" title="Save">💾</button>
     <button id="loadBtn" title="Load">📂</button>
     <button id="newMindMapBtn" title="New Mind Map">🆕</button>
+    <button id="keyboardHelpBtn" title="Keyboard Shortcuts">⌨</button>
   </div>
 
   <!-- Mind map container -->
@@ -126,7 +160,43 @@
     <svg id="connections-svg"></svg>
   </div>
 
+  <!-- Keyboard Shortcuts Help Overlay -->
+  <div id="keyboardHelpOverlay">
+    <div class="content">
+      <button class="close">&times;</button>
+      <h2>Keyboard Shortcuts</h2>
+      <ul>
+        <li><strong>Ctrl+S</strong>: Save Mind Map</li>
+        <li><strong>Ctrl+O</strong>: Load Mind Map</li>
+        <li><strong>Ctrl+N</strong>: New Mind Map</li>
+        <li><strong>Ctrl+E</strong>: Edit Selected Node Style</li>
+        <li><strong>F2</strong>: Edit Selected Node Text</li>
+        <li><strong>Delete</strong>: Remove Selected Node</li>
+        <li><strong>Ctrl + "=" or "+"</strong>: Zoom In</li>
+        <li><strong>Ctrl + "-"</strong>: Zoom Out</li>
+        <li><strong>Ctrl+0</strong>: Zoom All</li>
+        <li><strong>Arrow Keys</strong>: Pan View</li>
+        <li><strong>Enter</strong> (in text/style editors): Confirm</li>
+        <li><strong>Escape</strong> (in text/style editors or overlay): Cancel/Close</li>
+      </ul>
+    </div>
+  </div>
+
   <script>
+    function rgbToHex(rgb) {
+      if (!rgb) return "#000000";
+      if (rgb.startsWith("#")) return rgb;
+      const result = rgb.match(/\d+/g);
+      if (!result) return "#000000";
+      return (
+        "#" +
+        result
+          .slice(0, 3)
+          .map((num) => parseInt(num, 10).toString(16).padStart(2, "0"))
+          .join("")
+      );
+    }
+    
     /***********************
      * MindMapNode Class
      * Represents a node in the mind map.
@@ -251,14 +321,14 @@
           e.stopPropagation();
           this.editText();
         });
-        
-        // "Change Background Color" button.
-        const colorBtn = document.createElement('button');
-        colorBtn.innerHTML = '🖌';
-        colorBtn.title = 'Change Background Color';
-        colorBtn.addEventListener('click', (e) => {
+
+        // "Edit Style" button.
+        const styleBtn = document.createElement('button');
+        styleBtn.innerHTML = '🖌';
+        styleBtn.title = 'Edit Style';
+        styleBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          this.changeBackgroundColor();
+          this.editStyle();
         });
         
         // "Remove" button.
@@ -272,7 +342,7 @@
         
         actionsDiv.appendChild(addBtn);
         actionsDiv.appendChild(editBtn);
-        actionsDiv.appendChild(colorBtn);
+        actionsDiv.appendChild(styleBtn);
         actionsDiv.appendChild(removeBtn);
         this.element.appendChild(actionsDiv);
       }
@@ -285,55 +355,63 @@
       }
 
       editText() {
-        const originalText = this.text; // Save the original text
+        const originalText = this.text;
         const textInput = document.createElement("input");
         textInput.type = "text";
         textInput.value = this.text;
-        // Center the input in the viewport.
-        textInput.style.position = "fixed";
-        textInput.style.left = "50%";
-        textInput.style.top = "50%";
-        textInput.style.transform = "translate(-50%, -50%)";
-        textInput.style.fontSize = "18px";
-        textInput.style.padding = "10px";
-        textInput.style.border = "2px solid #007bff";
-        textInput.style.borderRadius = "4px";
-        textInput.style.zIndex = "2000";
-        textInput.style.width = "300px";
-        textInput.style.boxSizing = "border-box";
-        document.body.appendChild(textInput);
 
+        // Get computed styles from the node.
+        const computedStyle = window.getComputedStyle(this.element);
+        textInput.style.fontSize = computedStyle.fontSize;
+        textInput.style.fontFamily = computedStyle.fontFamily;
+        textInput.style.fontWeight = computedStyle.fontWeight;
+        textInput.style.border = "none";
+        textInput.style.outline = "none";
+        textInput.style.background = "transparent";
+        textInput.style.padding = "0";
+        textInput.style.margin = "0";
+        textInput.style.display = "inline-block";
+
+        // Function to update the width based on the content.
+        const updateInputWidth = () => {
+          const hiddenSpan = document.createElement("span");
+          // Make sure the span uses the same styles.
+          hiddenSpan.style.visibility = "hidden";
+          hiddenSpan.style.position = "absolute";
+          hiddenSpan.style.whiteSpace = "pre";
+          hiddenSpan.style.fontFamily = textInput.style.fontFamily;
+          hiddenSpan.style.fontSize = textInput.style.fontSize;
+          hiddenSpan.style.fontWeight = textInput.style.fontWeight;
+          hiddenSpan.textContent = textInput.value || textInput.placeholder || "";
+          document.body.appendChild(hiddenSpan);
+          // Add extra padding (e.g., 20px) for comfort.
+          const newWidth = hiddenSpan.offsetWidth;
+          textInput.style.width = newWidth + "px";
+          document.body.removeChild(hiddenSpan);
+        };
+
+        updateInputWidth();
+        textInput.addEventListener("input", updateInputWidth);
+
+        // Replace the current text node with the input.
+        if (this.element.firstChild && this.element.firstChild.nodeType === Node.TEXT_NODE) {
+          this.element.replaceChild(textInput, this.element.firstChild);
+        } else {
+          this.element.insertBefore(textInput, this.element.firstChild);
+        }
         textInput.focus();
         textInput.select();
 
-        // Live update the node's text as the user types.
-        textInput.addEventListener("input", (e) => {
-          if (this.element.firstChild) {
-            this.element.firstChild.nodeValue = e.target.value;
-          } else {
-            this.element.textContent = e.target.value;
-          }
-        });
-
         const finishEditing = () => {
           this.text = textInput.value;
+          const textNode = document.createTextNode(this.text);
+          this.element.replaceChild(textNode, textInput);
           this.mindMap.saveState();
-          if (document.body.contains(textInput)) {
-            document.body.removeChild(textInput);
-          }
         };
 
         const cancelEditing = () => {
-          // Revert to the original text.
-          this.text = originalText;
-          if (this.element.firstChild) {
-            this.element.firstChild.nodeValue = originalText;
-          } else {
-            this.element.textContent = originalText;
-          }
-          if (document.body.contains(textInput)) {
-            document.body.removeChild(textInput);
-          }
+          const textNode = document.createTextNode(originalText);
+          this.element.replaceChild(textNode, textInput);
         };
 
         textInput.addEventListener("keydown", (e) => {
@@ -343,64 +421,144 @@
             cancelEditing();
           }
         });
-
-        // Commit changes on blur.
         textInput.addEventListener("blur", finishEditing);
       }
 
-      changeBackgroundColor() {
-        const originalColor = this.backgroundColor; // Save the original color
-        const colorInput = document.createElement("input");
-        colorInput.type = "color";
-        colorInput.value = this.backgroundColor;
-        // Center the color input in the viewport.
-        colorInput.style.position = "fixed";
-        colorInput.style.left = "50%";
-        colorInput.style.top = "50%";
-        colorInput.style.transform = "translate(-50%, -50%)";
-        colorInput.style.zIndex = "2000";
-        // Set explicit width/height for better visibility.
-        colorInput.style.width = "150px";
-        colorInput.style.height = "50px";
-        colorInput.style.border = "2px solid #007bff";
-        colorInput.style.borderRadius = "4px";
-        colorInput.style.cursor = "pointer";
-        document.body.appendChild(colorInput);
+      editStyle() {
+        // Get current computed styles.
+        const computedStyle = window.getComputedStyle(this.element);
+        const originalBackground =
+          this.backgroundColor || computedStyle.backgroundColor || "#ffffff";
+        const originalTextColor = computedStyle.color || "#000000";
+        const originalFontSize = computedStyle.fontSize || "16px";
 
-        colorInput.focus();
+        // Store original style values for cancel.
+        const origBg = originalBackground;
+        const origText = originalTextColor;
+        const origFs = originalFontSize;
 
-        // Live update: as the user picks a color, update the node's background.
-        colorInput.addEventListener("input", (e) => {
+        // Create a container for the floating style editor.
+        const editor = document.createElement("div");
+        editor.style.position = "absolute";
+        editor.style.background = "#fff";
+        editor.style.border = "1px solid #ccc";
+        editor.style.padding = "5px";
+        editor.style.boxShadow = "0 2px 4px rgba(0,0,0,0.2)";
+        editor.style.zIndex = "2000";
+        editor.style.minWidth = "150px";
+        editor.style.fontFamily = "sans-serif";
+        editor.style.fontSize = "12px";
+
+        // --- Background Color Option ---
+        const bgLabel = document.createElement("label");
+        bgLabel.textContent = "Background: ";
+        const bgInput = document.createElement("input");
+        bgInput.type = "color";
+        bgInput.value = originalBackground.startsWith("#")
+          ? originalBackground
+          : rgbToHex(originalBackground);
+        bgInput.title = "Background Color";
+        bgInput.style.cursor = "pointer";
+        bgLabel.appendChild(bgInput);
+
+        // --- Foreground (Text) Color Option ---
+        const fgLabel = document.createElement("label");
+        fgLabel.textContent = "Text: ";
+        const fgInput = document.createElement("input");
+        fgInput.type = "color";
+        fgInput.value = originalTextColor.startsWith("#")
+          ? originalTextColor
+          : rgbToHex(originalTextColor);
+        fgInput.title = "Text Color";
+        fgInput.style.cursor = "pointer";
+        fgLabel.appendChild(fgInput);
+
+        // --- Font Size Option ---
+        const fsLabel = document.createElement("label");
+        fsLabel.textContent = "Font Size: ";
+        const fsInput = document.createElement("input");
+        fsInput.type = "number";
+        fsInput.value = parseInt(originalFontSize, 10);
+        fsInput.min = 8;
+        fsInput.max = 72;
+        fsInput.title = "Font Size (px)";
+        fsInput.style.width = "60px";
+        fsLabel.appendChild(fsInput);
+
+        // --- Done and Cancel Buttons ---
+        const doneButton = document.createElement("button");
+        doneButton.textContent = "Done";
+        doneButton.style.marginTop = "5px";
+        doneButton.style.fontSize = "12px";
+        doneButton.style.marginRight = "5px";
+        
+        const cancelButton = document.createElement("button");
+        cancelButton.textContent = "Cancel";
+        cancelButton.style.marginTop = "5px";
+        cancelButton.style.fontSize = "12px";
+
+        // --- Assemble the editor ---
+        editor.appendChild(bgLabel);
+        editor.appendChild(document.createElement("br"));
+        editor.appendChild(fgLabel);
+        editor.appendChild(document.createElement("br"));
+        editor.appendChild(fsLabel);
+        editor.appendChild(document.createElement("br"));
+        editor.appendChild(doneButton);
+        editor.appendChild(cancelButton);
+
+        // Append the editor to the document body.
+        document.body.appendChild(editor);
+
+        // Position the editor relative to the node.
+        const rect = this.element.getBoundingClientRect();
+        editor.style.top = rect.bottom + "px";
+        editor.style.left = rect.left + "px";
+
+        // --- Event Listeners for Live Updates ---
+        bgInput.addEventListener("input", (e) => {
+          this.backgroundColor = e.target.value;
           this.element.style.backgroundColor = e.target.value;
         });
-
-        const finishColorEdit = () => {
-          this.backgroundColor = colorInput.value;
-          this.mindMap.saveState();
-          if (document.body.contains(colorInput)) {
-            document.body.removeChild(colorInput);
-          }
-        };
-
-        const cancelColorEdit = () => {
-          // Revert the background color.
-          this.element.style.backgroundColor = originalColor;
-          if (document.body.contains(colorInput)) {
-            document.body.removeChild(colorInput);
-          }
-        };
-
-        colorInput.addEventListener("keydown", (e) => {
-          if (e.key === "Escape") {
-            cancelColorEdit();
-          } else if (e.key === "Enter") {
-            finishColorEdit();
-          }
+        fgInput.addEventListener("input", (e) => {
+          this.element.style.color = e.target.value;
+        });
+        fsInput.addEventListener("input", (e) => {
+          this.element.style.fontSize = e.target.value + "px";
         });
 
-        // When the input loses focus or a change is made, commit the new color.
-        colorInput.addEventListener("blur", finishColorEdit);
-        colorInput.addEventListener("change", finishColorEdit);
+        // Keydown handler for the style editor.
+        const styleKeydownHandler = (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            doneButton.click();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            cancelButton.click();
+          }
+        };
+        document.addEventListener("keydown", styleKeydownHandler);
+
+        // --- Button Handlers ---
+        doneButton.addEventListener("click", () => {
+          if (editor.parentElement) {
+            editor.parentElement.removeChild(editor);
+          }
+          document.removeEventListener("keydown", styleKeydownHandler);
+          this.mindMap.saveState();
+        });
+
+        cancelButton.addEventListener("click", () => {
+          // Revert style changes.
+          this.backgroundColor = origBg;
+          this.element.style.backgroundColor = origBg;
+          this.element.style.color = origText;
+          this.element.style.fontSize = origFs;
+          if (editor.parentElement) {
+            editor.parentElement.removeChild(editor);
+          }
+          document.removeEventListener("keydown", styleKeydownHandler);
+        });
       }
     }
     
@@ -922,6 +1080,7 @@
      ***********************/
     document.addEventListener('DOMContentLoaded', () => {
       const mindMap = new MindMap('mindmap-container', 'scene', 'connections-svg');
+      window.mindMap = mindMap; // make it globally accessible for keyboard shortcuts
       
       // Toolbar button: Add Child.
       document.getElementById('addNodeBtn').addEventListener('click', () => {
@@ -952,7 +1111,7 @@
         mindMap.zoomAll();
       });
       
-      // File Save: also auto-saves to localStorage.
+      // File Save.
       document.getElementById('saveBtn').addEventListener('click', () => {
         mindMap.saveState();
         const data = mindMap.getStateData();
@@ -995,6 +1154,96 @@
       document.getElementById('newMindMapBtn').addEventListener('click', () => {
         if (confirm("Start a new mind map? Current changes will be lost.")) {
           mindMap.newMindMap();
+        }
+      });
+      
+      // Keyboard Help Overlay.
+      const helpBtn = document.getElementById('keyboardHelpBtn');
+      const helpOverlay = document.getElementById('keyboardHelpOverlay');
+      const closeHelp = helpOverlay.querySelector('button.close');
+      helpBtn.addEventListener('click', () => {
+        helpOverlay.style.display = "block";
+      });
+      closeHelp.addEventListener('click', () => {
+        helpOverlay.style.display = "none";
+      });
+      
+      // Global Keyboard Shortcuts.
+      document.addEventListener("keydown", function(e) {
+        // Do not trigger global shortcuts if focus is on an input or textarea.
+        if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return;
+        
+        // If the keyboard help overlay is open, allow Escape to close it.
+        if (helpOverlay.style.display === "block") {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            helpOverlay.style.display = "none";
+          }
+          return;
+        }
+        
+        if (e.ctrlKey) {
+          switch(e.key.toLowerCase()) {
+            case 's':
+              e.preventDefault();
+              document.getElementById("saveBtn").click();
+              break;
+            case 'o':
+              e.preventDefault();
+              document.getElementById("loadBtn").click();
+              break;
+            case 'n':
+              e.preventDefault();
+              document.getElementById("newMindMapBtn").click();
+              break;
+            case 'e':
+              e.preventDefault();
+              if (mindMap.selectedNode) {
+                mindMap.selectedNode.editStyle();
+              }
+              break;
+            case '=':
+            case '+':
+              e.preventDefault();
+              document.getElementById("zoomInBtn").click();
+              break;
+            case '-':
+              e.preventDefault();
+              document.getElementById("zoomOutBtn").click();
+              break;
+            case '0':
+              e.preventDefault();
+              document.getElementById("zoomAllBtn").click();
+              break;
+          }
+        } else {
+          if (e.key === "Delete" || e.key === "Backspace") {
+              e.preventDefault();
+              if (mindMap.selectedNode) {
+                  mindMap.removeNode(mindMap.selectedNode);
+              }
+          } else if (e.key === "F2") {
+              e.preventDefault();
+              if (mindMap.selectedNode) {
+                  mindMap.selectedNode.editText();
+              }
+          } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              mindMap.panY += 20;
+              mindMap._updateTransform();
+          } else if (e.key === "ArrowDown") {
+              e.preventDefault();
+              mindMap.panY -= 20;
+              mindMap._updateTransform();
+          } else if (e.key === "ArrowLeft") {
+              e.preventDefault();
+              mindMap.panX += 20;
+              mindMap._updateTransform();
+          } else if (e.key === "ArrowRight") {
+              e.preventDefault();
+              mindMap.panX -= 20;
+              mindMap._updateTransform();
+          }
         }
       });
       
