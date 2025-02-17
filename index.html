@@ -33,6 +33,32 @@
     #toolbar button:hover {
       background: #0056b3;
     }
+    /* Export Menu */
+    #exportMenu {
+      display: none;
+      position: fixed;
+      top: 50px;
+      left: 10px;
+      background: #fff;
+      border: 1px solid #ccc;
+      padding: 5px;
+      z-index: 1001;
+      border-radius: 4px;
+      box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+    }
+    #exportMenu button {
+      padding: 5px 10px;
+      margin: 2px;
+      font-size: 14px;
+      border: none;
+      background: #007bff;
+      color: #fff;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #exportMenu button:hover {
+      background: #0056b3;
+    }
     /* Mind map container */
     #mindmap-container {
       position: absolute;
@@ -137,6 +163,9 @@
       cursor: pointer;
     }
   </style>
+  <!-- External Libraries for Exporting -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dom-to-image/2.6.0/dom-to-image.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
   <!-- Toolbar -->
@@ -150,6 +179,15 @@
     <button id="loadBtn" title="Load">📂</button>
     <button id="newMindMapBtn" title="New Mind Map">🆕</button>
     <button id="keyboardHelpBtn" title="Keyboard Shortcuts">⌨</button>
+    <!-- New Export Button -->
+    <button id="exportBtn" title="Export Mind Map">⤓</button>
+  </div>
+
+  <!-- Export Menu -->
+  <div id="exportMenu">
+    <button id="exportPngBtn">Export as PNG</button>
+    <button id="exportPdfBtn">Export as PDF</button>
+    <button id="exportSvgBtn">Export as SVG</button>
   </div>
 
   <!-- Mind map container -->
@@ -1166,6 +1204,75 @@
       });
       closeHelp.addEventListener('click', () => {
         helpOverlay.style.display = "none";
+      });
+      
+      /***********************
+       * Export Functionality
+       ***********************/
+      const exportMenu = document.getElementById('exportMenu');
+      
+      // Toggle the export menu when the export button is clicked.
+      document.getElementById('exportBtn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        exportMenu.style.display = exportMenu.style.display === 'none' ? 'block' : 'none';
+      });
+      
+      // Hide export menu if clicking outside.
+      document.addEventListener('click', (e) => {
+        if (!exportMenu.contains(e.target) && e.target.id !== 'exportBtn') {
+          exportMenu.style.display = 'none';
+        }
+      });
+      
+      // Export as PNG.
+      document.getElementById('exportPngBtn').addEventListener('click', () => {
+        const container = document.getElementById('mindmap-container');
+        domtoimage.toPng(container)
+          .then(function (dataUrl) {
+            const a = document.createElement('a');
+            a.download = 'mindmap.png';
+            a.href = dataUrl;
+            a.click();
+          })
+          .catch(function (error) {
+            console.error('Export to PNG failed!', error);
+          });
+        exportMenu.style.display = 'none';
+      });
+      
+      // Export as PDF.
+      document.getElementById('exportPdfBtn').addEventListener('click', () => {
+        const container = document.getElementById('mindmap-container');
+        domtoimage.toPng(container)
+          .then(function (dataUrl) {
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF('landscape');
+            const imgProps = pdf.getImageProperties(dataUrl);
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+            pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
+            pdf.save('mindmap.pdf');
+          })
+          .catch(function (error) {
+            console.error('Export to PDF failed!', error);
+          });
+        exportMenu.style.display = 'none';
+      });
+      
+      // Export as SVG.
+      document.getElementById('exportSvgBtn').addEventListener('click', () => {
+        const container = document.getElementById('mindmap-container');
+        domtoimage.toSvg(container)
+          .then(function (dataUrl) {
+            const a = document.createElement('a');
+            a.download = 'mindmap.svg';
+            a.href = dataUrl;
+            a.click();
+          })
+          .catch(function (error) {
+            console.error('Export to SVG failed!', error);
+          });
+        exportMenu.style.display = 'none';
       });
       
       // Global Keyboard Shortcuts.
