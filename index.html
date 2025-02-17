@@ -65,10 +65,12 @@
       user-select: none;
       cursor: grab;
       transition: box-shadow 0.2s, border-color 0.2s;
+      z-index: 1; /* default stacking */
     }
     .node.selected {
       border-color: #007bff;
       box-shadow: 0 0 8px rgba(0, 123, 255, 0.5);
+      z-index: 1000; /* bring selected node (and its buttons) on top */
     }
     /* Node action buttons */
     .node .actions {
@@ -78,6 +80,7 @@
       display: flex;
       flex-direction: column;
       gap: 5px;
+      z-index: 1001; /* ensure these buttons are above the node */
     }
     .node .actions button {
       width: 24px;
@@ -129,7 +132,7 @@
      * Represents a node in the mind map.
      ***********************/
     class MindMapNode {
-      constructor({ id, text = 'Node', x = 100, y = 100, onSelect = () => {}, onDrag = () => {}, mindMap }) {
+      constructor({ id, text = 'Node', x = 100, y = 100, backgroundColor = '#fff', onSelect = () => {}, onDrag = () => {}, mindMap }) {
         this.id = id;
         this.text = text;
         this.x = x;
@@ -143,6 +146,7 @@
         this.parent = null;
         this.children = [];
         this.lastTap = 0;  // For detecting double taps on touch devices.
+        this.backgroundColor = backgroundColor;
         this.element = this._createElement();
         this._initDrag();
       }
@@ -153,6 +157,7 @@
         nodeEl.textContent = this.text;
         nodeEl.style.left = `${this.x}px`;
         nodeEl.style.top = `${this.y}px`;
+        nodeEl.style.backgroundColor = this.backgroundColor;
         
         // Use pointer events so both mouse and touch work uniformly.
         nodeEl.addEventListener('pointerdown', (e) => {
@@ -247,6 +252,15 @@
           this.editText();
         });
         
+        // "Change Background Color" button.
+        const colorBtn = document.createElement('button');
+        colorBtn.innerHTML = '🖌';
+        colorBtn.title = 'Change Background Color';
+        colorBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.changeBackgroundColor();
+        });
+        
         // "Remove" button.
         const removeBtn = document.createElement('button');
         removeBtn.innerHTML = '−';
@@ -258,6 +272,7 @@
         
         actionsDiv.appendChild(addBtn);
         actionsDiv.appendChild(editBtn);
+        actionsDiv.appendChild(colorBtn);
         actionsDiv.appendChild(removeBtn);
         this.element.appendChild(actionsDiv);
       }
@@ -268,14 +283,124 @@
           this.element.removeChild(actionsDiv);
         }
       }
-      
+
       editText() {
-        const newText = prompt("Edit node text:", this.text);
-        if (newText !== null) {
-          this.text = newText;
-          this.element.firstChild.nodeValue = newText;
+        const originalText = this.text; // Save the original text
+        const textInput = document.createElement("input");
+        textInput.type = "text";
+        textInput.value = this.text;
+        // Center the input in the viewport.
+        textInput.style.position = "fixed";
+        textInput.style.left = "50%";
+        textInput.style.top = "50%";
+        textInput.style.transform = "translate(-50%, -50%)";
+        textInput.style.fontSize = "18px";
+        textInput.style.padding = "10px";
+        textInput.style.border = "2px solid #007bff";
+        textInput.style.borderRadius = "4px";
+        textInput.style.zIndex = "2000";
+        textInput.style.width = "300px";
+        textInput.style.boxSizing = "border-box";
+        document.body.appendChild(textInput);
+
+        textInput.focus();
+        textInput.select();
+
+        // Live update the node's text as the user types.
+        textInput.addEventListener("input", (e) => {
+          if (this.element.firstChild) {
+            this.element.firstChild.nodeValue = e.target.value;
+          } else {
+            this.element.textContent = e.target.value;
+          }
+        });
+
+        const finishEditing = () => {
+          this.text = textInput.value;
           this.mindMap.saveState();
-        }
+          if (document.body.contains(textInput)) {
+            document.body.removeChild(textInput);
+          }
+        };
+
+        const cancelEditing = () => {
+          // Revert to the original text.
+          this.text = originalText;
+          if (this.element.firstChild) {
+            this.element.firstChild.nodeValue = originalText;
+          } else {
+            this.element.textContent = originalText;
+          }
+          if (document.body.contains(textInput)) {
+            document.body.removeChild(textInput);
+          }
+        };
+
+        textInput.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            finishEditing();
+          } else if (e.key === "Escape") {
+            cancelEditing();
+          }
+        });
+
+        // Commit changes on blur.
+        textInput.addEventListener("blur", finishEditing);
+      }
+
+      changeBackgroundColor() {
+        const originalColor = this.backgroundColor; // Save the original color
+        const colorInput = document.createElement("input");
+        colorInput.type = "color";
+        colorInput.value = this.backgroundColor;
+        // Center the color input in the viewport.
+        colorInput.style.position = "fixed";
+        colorInput.style.left = "50%";
+        colorInput.style.top = "50%";
+        colorInput.style.transform = "translate(-50%, -50%)";
+        colorInput.style.zIndex = "2000";
+        // Set explicit width/height for better visibility.
+        colorInput.style.width = "150px";
+        colorInput.style.height = "50px";
+        colorInput.style.border = "2px solid #007bff";
+        colorInput.style.borderRadius = "4px";
+        colorInput.style.cursor = "pointer";
+        document.body.appendChild(colorInput);
+
+        colorInput.focus();
+
+        // Live update: as the user picks a color, update the node's background.
+        colorInput.addEventListener("input", (e) => {
+          this.element.style.backgroundColor = e.target.value;
+        });
+
+        const finishColorEdit = () => {
+          this.backgroundColor = colorInput.value;
+          this.mindMap.saveState();
+          if (document.body.contains(colorInput)) {
+            document.body.removeChild(colorInput);
+          }
+        };
+
+        const cancelColorEdit = () => {
+          // Revert the background color.
+          this.element.style.backgroundColor = originalColor;
+          if (document.body.contains(colorInput)) {
+            document.body.removeChild(colorInput);
+          }
+        };
+
+        colorInput.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") {
+            cancelColorEdit();
+          } else if (e.key === "Enter") {
+            finishColorEdit();
+          }
+        });
+
+        // When the input loses focus or a change is made, commit the new color.
+        colorInput.addEventListener("blur", finishColorEdit);
+        colorInput.addEventListener("change", finishColorEdit);
       }
     }
     
@@ -326,9 +451,9 @@
           text,
           x,
           y,
+          mindMap: this,
           onSelect: this._selectNode.bind(this),
-          onDrag: () => { this.updateConnections(); },
-          mindMap: this
+          onDrag: () => { this.updateConnections(); }
         });
         this.nodes.set(id, node);
         this.scene.appendChild(node.element);
@@ -709,7 +834,8 @@
             text: node.text,
             x: node.x,
             y: node.y,
-            parent: node.parent ? node.parent.id : null
+            parent: node.parent ? node.parent.id : null,
+            backgroundColor: node.backgroundColor
           });
         });
         return data;
@@ -744,6 +870,9 @@
           this.nodes.delete(node.id);
           // Set the correct id.
           node.id = n.id;
+          // Restore background color.
+          node.backgroundColor = n.backgroundColor || '#fff';
+          node.element.style.backgroundColor = node.backgroundColor;
           this.nodes.set(n.id, node);
           nodesById[n.id] = node;
         });
